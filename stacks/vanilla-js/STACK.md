@@ -1,107 +1,123 @@
-# Stack profile: Vanilla JS + Firebase
+# Stack profile: Vanilla JS + Vite + Firebase
 
-Browser-native ES modules, no bundler, no transpiler. Firebase Auth and
-Firestore as the backend. Read this whole file before applying a stack-coupled
-skill (`tdd`, `codebase-design`, `code-review`, `implement`, `prototype`).
+Plain JavaScript ES modules — no framework, no TypeScript. Vite for dev and
+build, Vitest for tests, ESLint 9 flat config. Firebase Auth and Firestore as
+the backend, Chart.js for graphs, jsPDF for exports.
 
-Do not assume this is the TypeScript profile with types removed. There is no
-`package.json` build step, no `tsc`, no import map resolution beyond what the
-browser does natively. Bare specifiers (`import x from "chart.js"`) do not
-work; imports are relative paths or full URLs.
+Read this whole file before applying a stack-coupled skill (`tdd`,
+`codebase-design`, `code-review`, `implement`, `prototype`).
 
-## The honest state of the feedback loop
+There is no type checker. Do not propose `tsc`, do not add type annotations,
+do not suggest converting files to `.ts` as part of an unrelated task.
 
-**There is no test runner in this project.** That is a fact about the repo, not
-an oversight to route around.
+## Commands
 
-The consequence for `/tdd`: do not write test files. There is nothing to run
-them with, and a suite that never executes is worse than no suite — it rots
-silently and lies about coverage.
+| Purpose       | Command                                       |
+| ------------- | --------------------------------------------- |
+| Dev server    | `npm run dev`                                   |
+| Run all tests | `npm test`                                      |
+| Watch tests   | `npm run test:watch`                            |
+| Run one file  | `npx vitest run tests/<name>.test.js`           |
+| Run one test  | `npx vitest run -t "<test name>"`               |
+| Lint          | `npm run lint`                                  |
+| Autofix       | `npm run lint:fix`                              |
+| Build         | `npm run build`                                 |
+| Full verify   | `npm run lint && npm test && npm run build`      |
 
-If a task genuinely calls for TDD, the first slice is *adding the runner*, not
-skipping the discipline. Say so and ask. Vitest runs against browser-native ES
-modules with almost no configuration and does not require adopting a bundler.
-Until that decision is made, work through the loop below instead.
+Run the full verify before declaring a slice green. The build is part of it:
+Vite catches broken imports that Vitest does not, because the test environment
+resolves differently from the bundler.
 
-## The loop that does exist
+## Test layout
 
-| Purpose            | Command                                       |
-| ------------------ | --------------------------------------------- |
-| Serve the app      | `npx serve .`                                   |
-| Firebase emulators | `firebase emulators:start`                      |
-| Deploy rules only  | `firebase deploy --only firestore:rules`        |
+Tests live in `tests/` at the repo root, **not** colocated with source. One
+file per domain concern, named after the concern rather than the source file:
+`session.test.js`, `deload.test.js`, `suggestion.test.js`.
 
-The red → green cycle runs through the emulator and the browser: reproduce the
-behaviour in the UI, change one thing, reload, observe. It is slower and less
-durable than a runner, but it is a real loop and it observes real behaviour.
+`tests/fixtures.js` holds shared builders. Reach for it before inventing new
+sample data — divergent fixtures are how two tests come to disagree about what
+a valid session looks like.
 
-**Never point the emulator-less app at production Firestore to try something
-out.** The emulator exists precisely so experiments cannot corrupt real
-training history.
+Follow the existing naming when adding a file. If a new test does not fit any
+existing concern, that is a signal worth raising: either the concern is new, or
+it belongs in a file that already exists.
 
 ## Seams
 
-- **Exported function of an ES module** — the public entry of a unit of
-  behaviour. This is the primary seam.
-- **The Firestore boundary** — the functions that read and write documents.
-  Everything above them should be reachable without touching Firebase at all.
-- **Security rules** — a seam in their own right, tested against the emulator
-  with `@firebase/rules-unit-testing` if a runner is ever added. Rules are the
-  only enforcement of the coach-sharing access model; UI checks are not.
+- **Exported function of a module under `src/domain/`** — the primary seam.
+  Pure logic, plain objects in and out. Almost every test should live here.
+- **`src/core/` and `src/features/` entry points** — orchestration. Testable
+  with fakes passed in, never with `vi.mock` on a relative path.
+- **The Firestore adapter boundary** — the small set of functions that read and
+  write documents. Everything above them must be reachable without Firebase.
+- **`firestore.rules`** — a seam in its own right. Rules are the only real
+  enforcement of who can read whose training data; a UI check is not access
+  control. Test them against the emulator with `@firebase/rules-unit-testing`.
 
-Not seams: DOM structure, CSS classes, element IDs, anything reached with
-`document.querySelector` from outside the module that owns it.
+Not seams: DOM structure, CSS classes, element IDs, Chart.js internals.
 
 ## The rule that keeps this codebase testable
 
-Firebase calls belong in a thin adapter layer. Domain logic — computing
-progression, grouping sets into supersets, deriving chart series — takes plain
-objects in and returns plain objects out, with no `db`, no `doc()`, no
-`onSnapshot` anywhere in it.
+Firebase calls belong in the adapter layer. Domain logic — progression,
+superset grouping, deload decisions, chart series — takes plain objects and
+returns plain objects, with no `db`, no `doc()`, no `onSnapshot` in sight.
 
-This is the single highest-value structural constraint here. It is what makes a
-runner cheap to add later, and it is what lets you reason about a bug without
-booting the emulator.
+The existing `tests/` suite works because that separation already largely
+holds. Every new feature either preserves it or erodes it.
+
+Anything time-dependent takes `now` as a parameter. Never call `Date.now()`
+inside a domain function — it makes the behaviour untestable and, for anything
+involving elapsed time, wrong the moment the app is backgrounded.
 
 ## Vertical slice
 
-One slice is: behaviour visible in the UI → the handler that drives it → the
-domain function → the adapter call → green in the browser.
+One slice is: failing test in `tests/` → domain function → orchestration →
+adapter → UI → green.
 
-Not: all the Firestore functions first, then the UI.
+Not: all the domain functions first, then all the wiring.
 
 ## Naming
 
-Function and variable names come from `CONTEXT.md`. If the glossary says
-"série efetiva", the code does not say `validSet`.
+Names come from the project's glossary. If the domain says "série efetiva",
+the code does not say `validSet`. Test names read as specifications:
+
+```js
+it("suggests a deload after three stalled sessions", ...)
+```
+
+Not `it("works")`, not `it("test deload 2")`.
 
 ## Anti-patterns specific to this stack
 
+- **`vi.mock` on a relative import.** Couples the test to file layout. Pass the
+  dependency in instead. If that is awkward, the seam is in the wrong place.
+- **Mocking the Firebase SDK.** Use the emulator, or test the domain function
+  that does not touch Firebase at all.
+- **`Date.now()` inside domain logic.** See above.
 - **Firestore documents shaped for the UI.** The array-to-object change for
-  superset persistence exists because arrays lost identity across writes.
-  Model for the data's own constraints, not for what renders conveniently.
-- **`onSnapshot` listeners without teardown.** Every listener registered on a
-  view must be unsubscribed when the view goes away, or the app leaks and
+  superset persistence exists because arrays lost identity across writes. Model
+  for the data's constraints, not for what renders conveniently.
+- **`onSnapshot` listeners without teardown.** Every listener a view registers
+  must be unsubscribed when the view goes away, or the app leaks and
   double-renders.
-- **Security enforced in the UI.** Hiding a button is not access control. Any
-  change to who can see whose data is a change to the rules file first.
+- **Chart.js instances recreated without `.destroy()`.** Old canvases keep their
+  listeners; the app degrades over a long session.
 - **Logic in event handlers.** A click handler that computes anything is a
   domain function that has not been extracted yet.
-- **Global mutable state on `window`.** Module scope is already private; use it.
-- **Chart.js instances recreated without `.destroy()`.** Old canvases keep
-  their listeners and the page slows down over a session.
 - **`async` without error handling on Firebase calls.** Offline is the normal
-  case for a PWA in a gym basement, not an edge case.
+  case for a PWA used in a gym, not an edge case.
+- **Snapshot tests as the primary assertion.** They record whatever the code
+  does, bug included.
 
 ## Deep modules here
 
 A deep module is an ES module with one or two exports and real behaviour
-inside. Signals of shallow: a module that exports a function per Firestore
-collection and does nothing else; a `utils.js` that has become a bag; a
-"service" that only forwards arguments to another module.
+inside. Signals of shallow: a module exporting one function per Firestore
+collection and nothing else; a `utils.js` that has become a bag; a module that
+forwards arguments to another module and adds nothing.
 
 ## Prototypes
 
-A single throwaway `.html` file with an inline `<script type="module">`, served
-by `npx serve`. Delete it afterwards. Do not add a prototype route to the real
-app and leave it there.
+A throwaway route or a scratch file under the Vite dev server, deleted
+afterwards. Do not leave a prototype route in the shipped app, and do not add
+a dependency to answer a design question.

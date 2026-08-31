@@ -5,6 +5,12 @@ description: Build a throwaway prototype to answer a design question. Use when t
 
 # Prototype
 
+Before applying anything below, load the active stack profile at
+`stacks/<stack>/STACK.md`, where `<stack>` is the value in `.agents/stack`. If
+that file is absent or empty, ask the user which stack this work targets and
+write the answer there before continuing. This skill supplies the discipline;
+the profile supplies the toolchain.
+
 A prototype is **throwaway code that answers a question**. The question decides the shape.
 
 ## Pick a branch

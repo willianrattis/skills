@@ -5,6 +5,12 @@ description: Shared vocabulary for designing deep modules. Use when the user wan
 
 # Codebase Design
 
+Before applying anything below, load the active stack profile at
+`stacks/<stack>/STACK.md`, where `<stack>` is the value in `.agents/stack`. If
+that file is absent or empty, ask the user which stack this work targets and
+write the answer there before continuing. This skill supplies the discipline;
+the profile supplies the toolchain.
+
 Design **deep modules**: a lot of behaviour behind a small interface, placed at a clean seam, testable through that interface. Use this language and these principles wherever code is being designed or restructured. The aim is leverage for callers, locality for maintainers, and testability for everyone.
 
 ## Glossary
